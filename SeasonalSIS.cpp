@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <igraph/igraph.h>
 
+#define _infty 1E10
+
 double   rand_dbl() {
     return ((double)(rand()))/RAND_MAX;
 }
@@ -265,6 +267,9 @@ struct _event{
 
 long int _SIS::ImplementNextEvent(igraph_t Graph) {
 
+    double t = GAN(&Graph,"t");
+    double L = GAN(&Graph,"L");
+
     double dt;
     long int i, j, node;
     igraph_vector_t Neigh;
@@ -278,7 +283,7 @@ long int _SIS::ImplementNextEvent(igraph_t Graph) {
 
             ninfected++;
 
-            _event event = {'r',1.0,node};
+            _event event = {'r',_mu,node};
             Events.push_back(event);
 
             igraph_vector_clear(&Neigh);
@@ -287,7 +292,7 @@ long int _SIS::ImplementNextEvent(igraph_t Graph) {
                 j = (long int)VECTOR(Neigh)[i];
                 if (VAN(&Graph,"Infected",j) == 0) {
 
-                    _event event = {'i',2.0/200.0,j};
+                    _event event = {'i',transmissibility.Evaluate(t),j};
                     Events.push_back(event);
 
                 }
@@ -295,11 +300,15 @@ long int _SIS::ImplementNextEvent(igraph_t Graph) {
         }
     }
 
-    double dtmin = 1E8;
     double totalp = 0.0;
+    double dtmin = _infty;
     std::vector<_event>::iterator event;
     for(event=Events.begin();event!=Events.end();++event) {
-        dt = -log( rand_dbl() ) / (*event).p;
+        if ((*event).type=='r') {
+            dt = -log( rand_dbl() ) / (*event).p;
+        } else {
+            dt = transmissibility.EvaluateIntegralInverse(L-log(rand_dbl())) - t;
+        }
         dtmin = (dt < dtmin) ? dtmin = dt : dtmin;
         totalp += (*event).p;
         (*event).p = totalp;
@@ -314,17 +323,13 @@ long int _SIS::ImplementNextEvent(igraph_t Graph) {
     }
     --event;
 
-    double t = GAN(&Graph,"t");
-    double L = GAN(&Graph,"L");
-
     SETGAN(&Graph,"t",t+dtmin);
+    SETGAN(&Graph,"L",transmissibility.EvaluateIntegral(t+dtmin));
 
     if ((*event).type=='i') {
-        //SETGAN(&Graph,"L",L+r);
         InfectNode(Graph,(*event).node);
         ninfected++;
     } else {
-        //SETGAN(&Graph,"L",transmissibility.EvaluateIntegral(t+smallest_recovery_interval));
         RecoverNode(Graph,(*event).node);
         ninfected--;
     }
@@ -387,10 +392,10 @@ int main(int argc, char *argv[]) {
 
     FILE *fo = fopen("temp.txt","w");
     fprintf(fo,"model\ttime\ti\n");
-    _SIS SISc(10,20,2.0,0.0,10.0); // T1, T2, L, DL, Tau
+    _SIS SISc(10,20,2.0/200.0,6.0/200.0,1.0); // T1, T2, L, DL, Tau
     //_SIS SISo(10,20,2.0,6.0,2.0);
     for (int run=1;run--;) {
-        SISc.RunSingleTrial(1.0,Graph,100,fo,"Cont");
+        SISc.RunSingleTrial(1.0,Graph,200,fo,"Cont");
         //SISo.RunSingleTrial(1.0,Graph,50,fo,"Osci");
     }
     fclose(fo);
